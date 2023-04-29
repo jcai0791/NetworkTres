@@ -24,7 +24,15 @@ def decapsulateLinkState(packet):
 
     return header,payload
 
+def encapsulateRouteTrace(TTL, src_ip, src_port, dest_ip, dest_port):
+    packet = struct.pack(f"!BI4sH4sH",'T',TTL,src_ip,src_port,dest_ip,dest_port)
+    return packet
 
+#returns outer header and inner packet separately
+def decapsulateRouteTrace(packet):
+    header = struct.unpack(f"!BI4sH4sH")
+                  #0   1    2        3        4       5
+    return header #T, TTL, srcIP, srcPort, destIP, destPort
 
 #Sends packet to (ip,port)
 def sendPacket(packet, ip, port):
@@ -62,9 +70,17 @@ def forwardpacket(packet,sip,sport):
         for n in TOPOLOGY[(sip,sport)]:
             sendPacket(packet,n[0],n[1])
 
-    else:
-        pass
-    header,_ = decapsulateLinkState(packet)
+    else: #Routetrace packet
+        header = decapsulateRouteTrace(packet)
+        if(header[1]==0):
+            newRP = encapsulateRouteTrace(0,sip,sport,header[4],header[5])
+            sendPacket(newRP,header[2],header[3])
+        else:
+            newRP = encapsulateRouteTrace(header[1]-1,header[2],header[3],header[4],header[5])
+            nextHop = ROUTING[(header[4],header[5])]
+            sendPacket(newRP,nextHop[0],nextHop[1])
+
+    #header,_ = decapsulateLinkState(packet)
 
 def buildForwardTable(sip, sport):
     global ROUTING
