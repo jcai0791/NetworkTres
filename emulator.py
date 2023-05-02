@@ -76,14 +76,14 @@ async def sendHello(sip,sport,sock):
     while True:
         for i in TOPOLOGY[(sip,int(sport))]:
             sendPacket(encapsulateHello(sip,sport),socket.inet_ntoa(i[0]),i[1],sock)  
-        await asyncio.sleep(.5)
+        await asyncio.sleep(.2)
 async def sendLinkState(sip,sport,sock):
     global SEQ_NO
     while True:
         for i in TOPOLOGY[(sip,int(sport))]:
             SEQ_NO[(sip,sport)]+=1
             sendPacket(encapsulateLinkState(sip,sport,SEQ_NO[(sip,sport)],25,TOPOLOGY[(sip, sport)]),socket.inet_ntoa(i[0]),i[1],sock)
-        await asyncio.sleep(.75)
+        await asyncio.sleep(.2)
 async def recvAndCheck(sip,sport,sock):
     global SEQ_NO, HELLO, TOPOLOGY
     while True:
@@ -190,11 +190,7 @@ def buildForwardTable(sip, sport):
                 visited.add(n)
                 ROUTING[n] = ROUTING[node]
     ROUTING[(sip, sport)] = None
-     rintInfo(sip,sport)
-        
-
-
-
+    printInfo(sip,sport)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

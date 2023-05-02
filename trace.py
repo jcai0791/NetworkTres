@@ -57,6 +57,7 @@ if __name__ == "__main__":
     listenSocket.settimeout(5)
     done = False
     curTTL = 0
+    shortestPath = []
     while not done:
         rPacket = encapsulateRouteTrace(curTTL,ownIP,port,destIP,destPort)
         sendPacket(rPacket,sourceIP,sourcePort)
@@ -70,9 +71,10 @@ if __name__ == "__main__":
             print("=====================")
         response = receiveResponse(listenSocket)
         if(response == None):
-            print("Cannont reach node")
+            print("Cannot reach node")
             sys.exit()
-        print("Received Response from: ",(socket.inet_ntoa(response[4]),response[5]))
+        # print("Received Response from: ",(socket.inet_ntoa(response[2]),response[3]))
+        shortestPath.append((socket.inet_ntoa(response[2]),response[3]))
         if(debug == 1):
             print("=====Received Packet====")
             print("TTL: ",response[1])
@@ -83,6 +85,8 @@ if __name__ == "__main__":
             print("=====================")
         if(response[2] == destIP and response[3] == destPort):
             print("Destination reached")
+            for i in range(len(shortestPath)):
+                print(f"Hop {i+1} IP {shortestPath[i][0]} Port {shortestPath[i][1]}")
             done = True
         else:
             curTTL += 1
