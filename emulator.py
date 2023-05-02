@@ -11,7 +11,7 @@ MAX_BYTES = 6000
 TOPOLOGY = defaultdict(lambda : [])
 HELLO = {}
 ROUTING = defaultdict(lambda : (b'',0))
-SEQ_NO = 0
+SEQ_NO = defaultdict(lambda : 0)
 ####### OLD STUFF #########
 def printInfo(sip,sport):
     print(f"ROUTING FOR NODE ({sip},{sport})")
@@ -81,8 +81,8 @@ async def sendLinkState(sip,sport,sock):
     global SEQ_NO
     while True:
         for i in TOPOLOGY[(sip,int(sport))]:
-            SEQ_NO+=1
-            sendPacket(encapsulateLinkState(sip,sport,SEQ_NO,25,TOPOLOGY[(sip, sport)]),socket.inet_ntoa(i[0]),i[1],sock)
+            SEQ_NO[(sip,sport)]+=1
+            sendPacket(encapsulateLinkState(sip,sport,SEQ_NO[(sip,sport)],25,TOPOLOGY[(sip, sport)]),socket.inet_ntoa(i[0]),i[1],sock)
         await asyncio.sleep(.75)
 async def recvAndCheck(sip,sport,sock):
     global SEQ_NO, HELLO
@@ -106,16 +106,18 @@ async def recvAndCheck(sip,sport,sock):
                     HELLO[(packet[1],packet[2])] = datetime.now()
                     TOPOLOGY[(sip,sport)] = TOPOLOGY[(sip,sport)]  + [(packet[1], packet[2])]
                     buildForwardTable(sip,sport)
-                    SEQ_NO += 1
+                    SEQ_NO[(sip,sport)] += 1
                     print(ROUTING)
                     for j in TOPOLOGY[(sip,sport)]:
-                        sendPacket(encapsulateLinkState(sip,sport,SEQ_NO,25,TOPOLOGY[(sip, sport)]),socket.inet_ntoa(i[0]),i[1],sock)
+                        sendPacket(encapsulateLinkState(sip,sport,SEQ_NO[(sip,sport)],25,TOPOLOGY[(sip, sport)]),socket.inet_ntoa(j[0]),j[1],sock)
                 for i in HELLO.keys():
                     if(packet[1] == i[0] and packet[2] == i[1]):
                         HELLO[i] = datetime.now()
             elif(t[0] == b'L'):
                 header,payload = decapsulateLinkState(data)
-                if(header[3] > SEQ_NO and not payload == TOPOLOGY[(header[1],int(header[2]))]):
+                if(header[3] > SEQ_NO[(header[1], header[2])] and not payload == TOPOLOGY[(header[1],int(header[2]))]):
+                    print(SEQ_NO)
+                    SEQ_NO[(header[1],header[2])] = header[3]
                     TOPOLOGY[(header[1],int(header[2]))] = payload
                     forwardpacket(data, sip,sport,sock)
                     buildForwardTable(sip,sport)
@@ -127,9 +129,9 @@ async def recvAndCheck(sip,sport,sock):
                 TOPOLOGY[(sip,sport)] = [j for j in TOPOLOGY[(sip,sport)] if not j == i]
                 expired.append(i)
                 buildForwardTable(sip,sport)
-                SEQ_NO += 1
+                SEQ_NO[(sip,sport)] += 1
                 for j in TOPOLOGY[(sip,sport)]:
-                    sendPacket(encapsulateLinkState(sip,sport,SEQ_NO,25,TOPOLOGY[(sip, sport)]),socket.inet_ntoa(i[0]),i[1],sock)
+                    sendPacket(encapsulateLinkState(sip,sport, SEQ_NO[(sip,sport)],25,TOPOLOGY[(sip, sport)]),socket.inet_ntoa(j[0]),j[1],sock)
         for i in expired:
             HELLO.pop(i)
 
@@ -185,7 +187,7 @@ def buildForwardTable(sip, sport):
                 visited.add(n)
                 ROUTING[n] = ROUTING[node]
     ROUTING[(sip, sport)] = None
-    printInfo(sip,sport)
+    # printInfo(sip,sport)
         
 
 

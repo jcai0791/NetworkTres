@@ -79,18 +79,18 @@ def test3():
         f.write(f"{elist[1][0]},{elist[1][1]} {elist[0][0]},{elist[0][1]} {elist[2][0]},{elist[2][1]}\n")
         f.write(f"{elist[2][0]},{elist[2][1]} {elist[0][0]},{elist[0][1]} {elist[1][0]},{elist[1][1]}\n")
 
+
     
-    parr = [None for i in range(3)]
+    parr = [None for i in range(2)]
     output = sys.stdout
     for i in range(2):
         parr[i] = subprocess.Popen(['python3', '../emulator.py',"-p", elist[i][1], "-f", "topology.txt"], stdout=output, stderr=subprocess.STDOUT)
         time.sleep(.5)
     
     parr[i] = subprocess.Popen(['python3', '../emulator.py',"-p", elist[2][1], "-f", "topology2.txt"], stdout=output, stderr=subprocess.STDOUT)
-
+    time.sleep(5)
     subprocess.Popen(['python3', '../trace.py',"-a", next(gen), "-b", elist[0][0], "-c", elist[0][1], "-d",elist[2][0], "-e", elist[2][1] ,"-f", "1"], stdout=output, stderr=subprocess.STDOUT)
 
-    time.sleep(5)
     for i in parr:
         i.terminate()
 if __name__ == "__main__":
