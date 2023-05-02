@@ -4,20 +4,28 @@ import struct
 import csv
 from collections import defaultdict
 import asyncio
+import errno
+import copy
 from datetime import datetime, timedelta
 MAX_BYTES = 6000
 TOPOLOGY = defaultdict(lambda : [])
 HELLO = {}
 ROUTING = defaultdict(lambda : (b'',0))
+SEQ_NO = 0
 ####### OLD STUFF #########
-def getType(packet):
-    pass
+def printInfo(sip,sport):
+    print(f"ROUTING FOR NODE ({sip},{sport})")
+    for key,value in ROUTING.items():
+        print(key, f"nextHop: {value}")
+    print(f"TOPOLOGY FOR NODE ({sip},{sport})")
+    for key,value in TOPOLOGY.items():
+        print(key, f"Adjacent Nodes {value}")
 #wraps inner packet (payload) with outer header
 def encapsulateHello(src_ip,src_port):
-    packet = struct.pack("!c4sH", 'H', src_ip, src_port)
+    packet = struct.pack("!c4sH", b'H', src_ip, src_port)
     return packet
 def encapsulateLinkState(src_ip, src_port,seq_no,ttl,payload):
-    packet = struct.pack("!c4sHIII" +("8s"*len(payload)),b'L', src_ip,src_port,seq_no,len(payload), ttl , *[i[0].to_bytes(4,'big') + i[1].to_bytes(4,'big') for i in payload])
+    packet = struct.pack("!c4sHIII" +("8s"*len(payload)),b'L', src_ip,src_port,seq_no,len(payload), ttl , *[i[0] + i[1].to_bytes(4,'big') for i in payload])
     return packet
 
 #returns outer header and inner packet separately
@@ -33,33 +41,29 @@ def decapsulateHello(packet):
     return header
 
 def encapsulateRouteTrace(TTL, src_ip, src_port, dest_ip, dest_port):
-    packet = struct.pack(f"!BI4sH4sH",'T',TTL,src_ip,src_port,dest_ip,dest_port)
+    packet = struct.pack(f"!cI4sH4sH",b'T',TTL,src_ip,src_port,dest_ip,dest_port)
     return packet
 
 #returns outer header and inner packet separately
 def decapsulateRouteTrace(packet):
-    header = struct.unpack(f"!BI4sH4sH")
+    header = struct.unpack_from(f"!BI4sH4sH",packet)
                   #0   1    2        3        4       5
     return header #T, TTL, srcIP, srcPort, destIP, destPort
 
 #Sends packet to (ip,port)
-def sendPacket(packet, ip, port):
-    sock = socket.socket(socket.AF_INET,  socket.SOCK_DGRAM)
+def sendPacket(packet, ip, port,sock):
     sock.sendto(packet,(ip,port))
 
 ######## HELPERS #######
-def sendHello(sip,sport):
-    for i in TOPOLOGY[(socket.inet_aton(sip),int(sport))]:
-        sendPacket(encapsulateHello(sip,sport),i[0],i[1])
+
+   
 
 
-def sendLinkState(seq_no):
-    for i in TOPOLOGY[(socket.inet_aton(sip),int(sport))]:
-        sendPacket(encapsulateLinkState(sip,sport,seq_no,20,),i[0],i[1])
+
 
 ####### REQUIRED FUNCTIONS ########
 def readtopology(filename,sip,sport):
-    global HELLO
+    global HELLO, TOPOLOGY
     with open(filename, "r") as f:
         d = []
         for row in csv.reader(f, delimiter=' '):
@@ -68,70 +72,109 @@ def readtopology(filename,sip,sport):
     buildForwardTable(sip,sport)
     HELLO = { i : datetime.now() for i in TOPOLOGY[(sip,sport)]}
 
-async def sendHello(sip,sport):
+async def sendHello(sip,sport,sock):
     while True:
-        sendHello(sip,sport)
+        for i in TOPOLOGY[(sip,int(sport))]:
+            sendPacket(encapsulateHello(sip,sport),socket.inet_ntoa(i[0]),i[1],sock)  
         await asyncio.sleep(.5)
-async def sendLinkState(sip,sport):
+async def sendLinkState(sip,sport,sock):
+    global SEQ_NO
     while True:
-        sendLinkState(sip,sport)
+        for i in TOPOLOGY[(sip,int(sport))]:
+            SEQ_NO+=1
+            sendPacket(encapsulateLinkState(sip,sport,SEQ_NO,25,TOPOLOGY[(sip, sport)]),socket.inet_ntoa(i[0]),i[1],sock)
         await asyncio.sleep(.75)
-async def recvAndCheck(sip,sport):
+async def recvAndCheck(sip,sport,sock):
+    global SEQ_NO, HELLO
     while True:
-        data, addr = sock.recvfrom(MAX_BYTES)
-        t = struct.unpack_from("!c", data, offset=0)
+        data = None
+        try:
+            data, addr = sock.recvfrom(MAX_BYTES)
+        except socket.error as e:
+            err = e.args[0] 
+            if err == errno.EAGAIN or err == errno.EWOULDBLOCK:
+                pass
+            else:
+                # a "real" error occurred
+                print(e)
 
-        if(t == 'H'):
-            packet = decapsulateHello(data)
-            for i in HELLO.keys():
-                if(packet[1] == i[0] and packet[2] == i[1]):
-                    HELLO[i] = datetime.now()
-                if(datime.now()- HELLO[i] > datetime.timedelta(seconds=1)):
-                    TOPOLOGY[(sip,sport)] = [j for j in TOPOLOGY[(sip,sport)] if not j == i]
+        if(data):
+            t = struct.unpack_from("!c", data, offset=0)
+            if(t[0] == b'H'):
+                packet = decapsulateHello(data)
+                if(not (packet[1], packet[2]) in HELLO):
+                    HELLO[(packet[1],packet[2])] = datetime.now()
+                    TOPOLOGY[(sip,sport)] = TOPOLOGY[(sip,sport)]  + [(packet[1], packet[2])]
                     buildForwardTable(sip,sport)
-        if(t == 'L'):
-            header,payload = decapsulateLinkState(data)
-            TOPOLOGY[(header[1],header[2])] = payload
-            forwardpacket(data, sip,sport)
-            buildForwardTable(sip,sport)
-        else:
-            forwardpacket(data,sip,sport)
-        await asyncio.sleep(0)
-def createroutes(sip,sport):
-    loop = asyncio.get_event_loop()
-    task=loop.create_task(recvAndCheck)
-    task1 = loop.create_task(sendHello)
-    task2= loop.create_task(sendLinkState)
-    loop.run_until_complete(asyncio.gather(task,task1))
+                    SEQ_NO += 1
+                    print(ROUTING)
+                    for j in TOPOLOGY[(sip,sport)]:
+                        sendPacket(encapsulateLinkState(sip,sport,SEQ_NO,25,TOPOLOGY[(sip, sport)]),socket.inet_ntoa(i[0]),i[1],sock)
+                for i in HELLO.keys():
+                    if(packet[1] == i[0] and packet[2] == i[1]):
+                        HELLO[i] = datetime.now()
+            elif(t[0] == b'L'):
+                header,payload = decapsulateLinkState(data)
+                if(header[3] > SEQ_NO and not payload == TOPOLOGY[(header[1],int(header[2]))]):
+                    TOPOLOGY[(header[1],int(header[2]))] = payload
+                    forwardpacket(data, sip,sport,sock)
+                    buildForwardTable(sip,sport)
+            else:
+                forwardpacket(data,sip,sport,sock)
+        expired = []
+        for i in HELLO.keys():
+            if(abs(datetime.now()- HELLO[i]) > timedelta(milliseconds=600)):
+                TOPOLOGY[(sip,sport)] = [j for j in TOPOLOGY[(sip,sport)] if not j == i]
+                expired.append(i)
+                buildForwardTable(sip,sport)
+                SEQ_NO += 1
+                for j in TOPOLOGY[(sip,sport)]:
+                    sendPacket(encapsulateLinkState(sip,sport,SEQ_NO,25,TOPOLOGY[(sip, sport)]),socket.inet_ntoa(i[0]),i[1],sock)
+        for i in expired:
+            HELLO.pop(i)
 
-def forwardpacket(packet,sip,sport):
+                
+        await asyncio.sleep(0)
+async def main(sip,sport,sock):
+    task=asyncio.create_task(recvAndCheck(sip,sport,sock))
+    task1 = asyncio.create_task(sendHello(sip,sport,sock))
+    task2= asyncio.create_task(sendLinkState(sip,sport,sock))
+    await task
+    await task1
+    await task2
+def createroutes(sip,sport,sock):
+    asyncio.run(main(sip,sport,sock))
+
+
+
+def forwardpacket(packet,sip,sport,sock):
     t = struct.unpack_from("!c", packet, offset=0)
-    if(t == b'H'):
+    if(t[0] == b'H'):
         pass
-    elif(t == b'L'):
+    elif(t[0] == b'L'):
         header,payload = decapsulateLinkState(packet)
         if(header[4]==0):
             return
         packet = encapsulateLinkState(header[1],header[2], header[3], header[4]-1, payload)
         for n in TOPOLOGY[(sip,sport)]:
-            sendPacket(packet,n[0],n[1])
+            sendPacket(packet,socket.inet_ntoa(n[0]),n[1],sock)
 
     else: #Routetrace packet
         header = decapsulateRouteTrace(packet)
         if(header[1]==0):
             newRP = encapsulateRouteTrace(0,sip,sport,header[4],header[5])
-            sendPacket(newRP,header[2],header[3])
+            sendPacket(newRP,socket.inet_ntoa(header[2]),header[3],sock)
         else:
             newRP = encapsulateRouteTrace(header[1]-1,header[2],header[3],header[4],header[5])
             nextHop = ROUTING[(header[4],header[5])]
-            sendPacket(newRP,nextHop[0],nextHop[1])
+            sendPacket(newRP,socket.inet_ntoa(nextHop[0]),nextHop[1],sock)
 
     #header,_ = decapsulateLinkState(packet)
 
 def buildForwardTable(sip, sport):
     global ROUTING
     ROUTING = { i : i for i in TOPOLOGY[(sip,sport)] }
-    q = TOPOLOGY[(sip,sport)]
+    q = copy.deepcopy(TOPOLOGY[(sip,sport)])
     visited = {i for i in TOPOLOGY[(sip,sport)]}
     visited.add((sip,sport))
     while len(q) > 0:
@@ -141,6 +184,8 @@ def buildForwardTable(sip, sport):
                 q.append(n)
                 visited.add(n)
                 ROUTING[n] = ROUTING[node]
+    ROUTING[(sip, sport)] = None
+    printInfo(sip,sport)
         
 
 
@@ -153,14 +198,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
     filename = args.filename
     port = int(args.port)
-    addr = socket.inet_aton(socket.gethostname())
-    # sock = socket.socket(socket.AF_INET,  socket.SOCK_DGRAM)
-    # sock.bind((socket.gethostname(), port))
-    readtopology(filename,"1.0.0.0",1)
-    print(ROUTING)
-    print(TOPOLOGY)
+    addr = socket.inet_aton(socket.gethostbyname(socket.gethostname()))
+    sock = socket.socket(socket.AF_INET,  socket.SOCK_DGRAM)
 
+    sock.bind((socket.gethostname(), port))
+    sock.setblocking(False)
 
+    readtopology(args.filename,addr,port)
+    createroutes(addr,port,sock)
 
             
 

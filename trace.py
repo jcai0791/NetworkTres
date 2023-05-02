@@ -3,24 +3,28 @@ import socket
 import struct
 import csv
 from collections import defaultdict
-
+import sys
 MAX_BYTES = 6000
 
 ####### OLD STUFF #########
 
 #wraps inner packet (payload) with outer header
 def encapsulateRouteTrace(TTL, src_ip, src_port, dest_ip, dest_port):
-    packet = struct.pack(f"!BI4sH4sH",'T',TTL,src_ip,src_port,dest_ip,dest_port)
+    packet = struct.pack(f"!cI4sH4sH",b'T',TTL,src_ip,src_port,dest_ip,dest_port)
     return packet
 
 #returns outer header and inner packet separately
 def decapsulateRouteTrace(packet):
-    header = struct.unpack(f"!BI4sH4sH")
+    header = struct.unpack_from(f"!cI4sH4sH", packet)
     return header
 
 def receiveResponse(listenSocket):
-    data, addr = listenSocket.recvfrom(MAX_BYTES)
-    header = decapsulateRouteTrace(data)
+    header = None
+    try:
+        data, addr = listenSocket.recvfrom(MAX_BYTES)
+        header = decapsulateRouteTrace(data)
+    except:
+        return header
                   #0   1    2        3        4       5
     return header #T, TTL, srcIP, srcPort, destIP, destPort
 
@@ -41,15 +45,16 @@ if __name__ == "__main__":
     parser.add_argument("-f", "--debug_option")
     args = parser.parse_args()
     port = int(args.routetrace_port)
-    sourceIP = socket.inet_aton(socket.gethostname(args.source_hostname))
+    sourceIP = socket.inet_aton(socket.gethostbyname(args.source_hostname))
     sourcePort = int(args.source_port)
-    destIP = socket.inet_aton(socket.gethostname(args.destination_hostname))
+    destIP = socket.inet_aton(socket.gethostbyname(args.destination_hostname))
     destPort = int(args.destination_port)
-    ownIP = socket.inet_aton(socket.gethostbyname(socket.gethostname))
+    ownIP = socket.inet_aton(socket.gethostbyname(socket.gethostname()))
     debug = int(args.debug_option)
 
     listenSocket = socket.socket(socket.AF_INET,  socket.SOCK_DGRAM)
     listenSocket.bind((socket.gethostname(), port))
+    listenSocket.settimeout(5)
     done = False
     curTTL = 0
     while not done:
@@ -64,6 +69,9 @@ if __name__ == "__main__":
             print("Dest Port: ",destPort)
             print("=====================")
         response = receiveResponse(listenSocket)
+        if(response == None):
+            print("Cannont reach node")
+            sys.exit()
         print("Received Response from: ",(socket.inet_ntoa(response[4]),response[5]))
         if(debug == 1):
             print("=====Received Packet====")
