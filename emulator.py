@@ -85,7 +85,7 @@ async def sendLinkState(sip,sport,sock):
             sendPacket(encapsulateLinkState(sip,sport,SEQ_NO[(sip,sport)],25,TOPOLOGY[(sip, sport)]),socket.inet_ntoa(i[0]),i[1],sock)
         await asyncio.sleep(.75)
 async def recvAndCheck(sip,sport,sock):
-    global SEQ_NO, HELLO
+    global SEQ_NO, HELLO, TOPOLOGY
     while True:
         data = None
         try:
@@ -107,7 +107,6 @@ async def recvAndCheck(sip,sport,sock):
                     TOPOLOGY[(sip,sport)] = TOPOLOGY[(sip,sport)]  + [(packet[1], packet[2])]
                     buildForwardTable(sip,sport)
                     SEQ_NO[(sip,sport)] += 1
-                    print(ROUTING)
                     for j in TOPOLOGY[(sip,sport)]:
                         sendPacket(encapsulateLinkState(sip,sport,SEQ_NO[(sip,sport)],25,TOPOLOGY[(sip, sport)]),socket.inet_ntoa(j[0]),j[1],sock)
                 for i in HELLO.keys():
@@ -116,15 +115,15 @@ async def recvAndCheck(sip,sport,sock):
             elif(t[0] == b'L'):
                 header,payload = decapsulateLinkState(data)
                 if(header[3] > SEQ_NO[(header[1], header[2])] and not payload == TOPOLOGY[(header[1],int(header[2]))]):
-                    print(SEQ_NO)
                     SEQ_NO[(header[1],header[2])] = header[3]
-                    TOPOLOGY[(header[1],int(header[2]))] = payload
+                    TOPOLOGY[(header[1],header[2])] = payload
                     forwardpacket(data, sip,sport,sock)
                     buildForwardTable(sip,sport)
             else:
                 forwardpacket(data,sip,sport,sock)
         expired = []
         for i in HELLO.keys():
+
             if(abs(datetime.now()- HELLO[i]) > timedelta(milliseconds=600)):
                 TOPOLOGY[(sip,sport)] = [j for j in TOPOLOGY[(sip,sport)] if not j == i]
                 expired.append(i)
@@ -168,8 +167,12 @@ def forwardpacket(packet,sip,sport,sock):
             sendPacket(newRP,socket.inet_ntoa(header[2]),header[3],sock)
         else:
             newRP = encapsulateRouteTrace(header[1]-1,header[2],header[3],header[4],header[5])
-            nextHop = ROUTING[(header[4],header[5])]
-            sendPacket(newRP,socket.inet_ntoa(nextHop[0]),nextHop[1],sock)
+            if((header[4],header[5]) in ROUTING):
+                nextHop = ROUTING[(header[4],header[5])]
+                sendPacket(newRP,socket.inet_ntoa(nextHop[0]),nextHop[1],sock)
+
+            else:
+                print("next hop not found")
 
     #header,_ = decapsulateLinkState(packet)
 
@@ -187,7 +190,7 @@ def buildForwardTable(sip, sport):
                 visited.add(n)
                 ROUTING[n] = ROUTING[node]
     ROUTING[(sip, sport)] = None
-    # printInfo(sip,sport)
+     rintInfo(sip,sport)
         
 
 
